@@ -81,7 +81,7 @@ static char s_web_pass[64] = "admin";
 static int s_btn_pin = 9;   /* GPIO9 = boot button on many ESP32-C3 devkits */
 static int s_sda_pin = 6;
 static int s_scl_pin = 7;
-static int s_led_pin        = 10; /* GPIO10 = LED; -1 = disabled */
+static int s_led_pin        = 8; /* GPIO10 = LED; -1 = disabled */
 static int s_disp_timeout_s = 60; /* display off after N seconds idle; 0=never */
 
 /* ---- Runtime state ---- */
@@ -101,12 +101,18 @@ static bool s_in_chat_mode = false;  /* false = show status, true = show chat */
 static volatile bool    s_disp_on       = true;
 static volatile int64_t s_last_activity = 0; /* esp_timer_get_time() of last event */
 
+/* Forward declarations (defined in display helpers section below) */
+static void disp_lock(void);
+static void disp_unlock(void);
+
 static void disp_activity(void)
 {
     s_last_activity = esp_timer_get_time();
     if (!s_disp_on) {
         s_disp_on = true;
+        disp_lock();
         ssd1306_power(true);
+        disp_unlock();
     }
 }
 
@@ -624,7 +630,9 @@ static void morse_task(void *arg)
             /* Long press (>3 s): turn display off */
             if (dur_us >= 3000000LL) {
                 s_disp_on = false;
+                disp_lock();
                 ssd1306_power(false);
+                disp_unlock();
                 continue;
             }
 
@@ -668,19 +676,21 @@ static void led_disp_task(void *arg)
     for (;;) {
         /* LED: flash while unread messages are waiting */
         if (s_led_pin >= 0 && s_pager_waiting) {
-            gpio_set_level(s_led_pin, 1);
-            vTaskDelay(pdMS_TO_TICKS(200));
             gpio_set_level(s_led_pin, 0);
             vTaskDelay(pdMS_TO_TICKS(200));
+            gpio_set_level(s_led_pin, 1);
+            vTaskDelay(pdMS_TO_TICKS(200));
         } else {
-            if (s_led_pin >= 0) gpio_set_level(s_led_pin, 0);
+            if (s_led_pin >= 0) gpio_set_level(s_led_pin, 1);
 
             /* Display auto-off when idle */
             if (s_disp_on && s_disp_timeout_s > 0) {
                 int64_t idle_us = esp_timer_get_time() - s_last_activity;
                 if (idle_us >= (int64_t)s_disp_timeout_s * 1000000LL) {
                     s_disp_on = false;
+                    disp_lock();
                     ssd1306_power(false);
+                    disp_unlock();
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -700,7 +710,7 @@ static void led_init(void)
             .intr_type    = GPIO_INTR_DISABLE,
         };
         gpio_config(&io);
-        gpio_set_level(s_led_pin, 0);
+        gpio_set_level(s_led_pin, 1);
     }
     xTaskCreate(led_disp_task, "led_disp", 1024, NULL, 3, NULL);
 }
