@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>nanoChat V%%VERSION%%</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:Arial,sans-serif;margin:20px;max-width:480px}
+h1{font-size:1.3em;margin-bottom:4px}
+.sub{color:#888;font-size:0.85em;margin-bottom:16px}
+.card{border:1px solid #ccc;border-radius:6px;padding:12px;margin:8px 0}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ccc;margin-right:6px;vertical-align:middle}
+.dot.ok{background:#2a2}
+.dot.err{background:#c44}
+a.btn{display:inline-block;padding:8px 14px;margin:4px 4px 4px 0;background:#eee;border:1px solid #ccc;border-radius:4px;text-decoration:none;color:#333;font-size:0.9em}
+a.btn:hover{background:#ddd}
+#msg{font-size:0.85em;color:#888;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>nanoChat</h1>
+<div class="sub">V%%VERSION%%</div>
+
+<div class="card">
+  <strong>Status</strong>
+  <p><span class="dot" id="dot_sta"></span>WiFi STA: <span id="st_sta">…</span></p>
+  <p><span class="dot" id="dot_mqtt"></span>MQTT: <span id="st_mqtt">…</span></p>
+  <p><span class="dot" id="dot_ap"></span>AP: <span id="st_ap">…</span></p>
+</div>
+
+<div class="card">
+  <strong>Configuration</strong><br><br>
+  <a class="btn" href="/wifi">WiFi Settings</a>
+  <a class="btn" href="/config">MQTT &amp; Hardware</a>
+</div>
+
+<div id="msg"></div>
+
+<script>
+async function poll(){
+  try{
+    const j=await (await fetch('/status')).json();
+    document.getElementById('st_sta').textContent = j.sta ? (j.ip||'connected') : 'Not connected';
+    document.getElementById('dot_sta').className  = 'dot '+(j.sta?'ok':'err');
+    document.getElementById('st_mqtt').textContent = j.mqtt ? 'Connected' : 'Disconnected';
+    document.getElementById('dot_mqtt').className  = 'dot '+(j.mqtt?'ok':'err');
+    document.getElementById('st_ap').textContent   = j.ap || '';
+    document.getElementById('dot_ap').className    = 'dot ok';
+  }catch(e){
+    document.getElementById('msg').textContent='Status fetch failed';
+  }
+}
+poll();
+setInterval(poll,3000);
+</script>
+</body>
+</html>

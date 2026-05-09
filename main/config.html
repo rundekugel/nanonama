@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>nanoChat Config V%%VERSION%%</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:Arial,sans-serif;margin:20px;max-width:520px}
+h2{font-size:1.2em}
+label{display:block;margin:8px 0 2px;font-size:0.9em;font-weight:bold}
+input[type=text],input[type=number],input[type=password],textarea{
+  width:100%;box-sizing:border-box;padding:6px;margin-bottom:4px;
+  border:1px solid #ccc;border-radius:4px;font-size:0.9em}
+textarea{height:120px;font-family:monospace;font-size:0.8em}
+button{padding:8px 16px;margin:4px 4px 4px 0;border:1px solid #aaa;
+  border-radius:4px;background:#eee;cursor:pointer}
+button:hover{background:#ddd}
+.card{border:1px solid #ccc;border-radius:6px;padding:12px;margin:10px 0}
+#msg{margin-top:10px;font-size:0.9em;color:#060}
+.row2{display:flex;gap:8px}
+.row2>div{flex:1}
+.chk{display:flex;align-items:center;gap:8px;margin:8px 0}
+.chk input{width:auto}
+</style>
+</head>
+<body>
+<p><a href="/">&larr; Back</a></p>
+<h2>MQTT &amp; Hardware Config V%%VERSION%%</h2>
+
+<div class="card">
+<h3 style="margin-top:0">MQTT Broker</h3>
+<label>Host / IP</label>
+<input id="host" type="text" placeholder="broker.example.com">
+<label>Port</label>
+<input id="port" type="number" value="8883" min="1" max="65535">
+<label>Username</label>
+<input id="user" type="text" placeholder="mqtt user">
+<label>Password</label>
+<input id="pass" type="password" placeholder="leave blank to keep current">
+<p id="pass_hint" style="font-size:0.8em;color:#888;margin:0"></p>
+<label>Subscribe topic (incoming)</label>
+<input id="rx" type="text" placeholder="chat/rx">
+<label>Publish topic (outgoing morse)</label>
+<input id="tx" type="text" placeholder="chat/tx">
+<label>State topic (online/offline LWT)</label>
+<input id="state" type="text" placeholder="chat/state">
+<div class="chk">
+  <input id="tls" type="checkbox" checked>
+  <label style="margin:0;font-weight:normal">Use TLS (port 8883)</label>
+</div>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">TLS CA Certificate</h3>
+<p style="font-size:0.85em;color:#666;margin-top:0">
+  Paste the broker's CA certificate in PEM format.<br>
+  Leave empty to connect without certificate verification.
+</p>
+<textarea id="cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+<p id="cert_hint" style="font-size:0.8em;color:#888"></p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Hardware</h3>
+<div class="row2">
+  <div>
+    <label>Morse button GPIO</label>
+    <input id="btn" type="number" value="9" min="0" max="21">
+  </div>
+  <div>
+    <label>I2C SDA GPIO</label>
+    <input id="sda" type="number" value="6" min="0" max="21">
+  </div>
+  <div>
+    <label>I2C SCL GPIO</label>
+    <input id="scl" type="number" value="7" min="0" max="21">
+  </div>
+  <div>
+    <label>LED GPIO (-1=off)</label>
+    <input id="led" type="number" value="10" min="-1" max="21">
+  </div>
+  <div>
+    <label>Display off (s, 0=never)</label>
+    <input id="disp_to" type="number" value="60" min="0" max="3600">
+  </div>
+</div>
+<p style="font-size:0.8em;color:#888;margin-bottom:0">
+  Hardware changes take effect after reboot.
+  Long-press button (&gt;3 s) turns display off immediately.
+</p>
+</div>
+
+<div class="card">
+<h3 style="margin-top:0">Web Interface</h3>
+<label>Admin password (username: admin)</label>
+<input id="webpass" type="password" placeholder="leave blank to keep current">
+</div>
+
+<button onclick="save()">Save</button>
+<button onclick="saveReboot()">Save &amp; Reboot</button>
+<div id="msg"></div>
+
+<script>
+async function load(){
+  try {
+    const j = await (await fetch('/config/get')).json();
+    g('host').value  = j.host  || '';
+    g('port').value  = j.port  || 8883;
+    g('user').value  = j.user  || '';
+    g('rx').value    = j.rx_topic    || 'chat/rx';
+    g('tx').value    = j.tx_topic    || 'chat/tx';
+    g('state').value = j.state_topic || 'chat/state';
+    g('tls').checked = !!j.tls;
+    g('btn').value   = j.btn;
+    g('sda').value   = j.sda;
+    g('scl').value   = j.scl;
+    g('led').value     = j.led;
+    g('disp_to').value = j.disp_to;
+    if (j.has_pass)
+      g('pass_hint').textContent = 'Password currently stored.';
+    if (j.has_cert)
+      g('cert_hint').textContent = 'Certificate currently stored.';
+  } catch(e) {
+    g('msg').textContent = 'Load failed: ' + e;
+  }
+}
+
+function g(id){ return document.getElementById(id); }
+
+function buildBody(){
+  const host  = g('host').value.trim();
+  const port  = g('port').value.trim();
+  const user  = g('user').value.trim();
+  const pass  = g('pass').value;
+  const rx    = g('rx').value.trim();
+  const tx    = g('tx').value.trim();
+  const state = g('state').value.trim();
+  const tls   = g('tls').checked ? '1' : '0';
+  const btn   = g('btn').value.trim();
+  const sda   = g('sda').value.trim();
+  const scl   = g('scl').value.trim();
+  const led    = g('led').value.trim();
+  const disp_to = g('disp_to').value.trim();
+  const wp     = g('webpass').value;
+  const cert   = g('cert').value.trim();
+  /* host|port|user|pass|rx|tx|state|tls|btn|sda|scl|led|disp_to|webpass|cert */
+  return [host,port,user,pass,rx,tx,state,tls,
+          btn,sda,scl,led,disp_to,wp,cert].join('|');
+}
+
+async function save(){
+  const msg = g('msg');
+  msg.textContent = 'Saving…';
+  msg.style.color = '#888';
+  try {
+    const r = await fetch(
+      '/config/set', {method:'POST', body:buildBody()});
+    const t = await r.text();
+    if (t === 'OK') {
+      msg.textContent = 'Saved.';
+      msg.style.color = '#060';
+    } else {
+      msg.textContent = 'Error: ' + t;
+      msg.style.color = '#c00';
+    }
+  } catch(e) {
+    msg.textContent = 'Failed: ' + e;
+    msg.style.color = '#c00';
+  }
+}
+
+async function saveReboot(){
+  await save();
+  g('msg').textContent = 'Saved – rebooting…';
+  await fetch('/reboot', {method:'POST'});
+  setTimeout(() => location.href = '/', 4000);
+}
+
+load();
+</script>
+</body>
+</html>

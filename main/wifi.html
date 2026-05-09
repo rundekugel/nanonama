@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Admin-Keyboard – WiFi V%%VERSION%%</title>
+<style>
+body{font-family:Arial;margin:20px}
+input{width:100%;margin:4px 0;box-sizing:border-box;padding:6px}
+button{margin:4px;padding:8px}
+.card{border:1px solid #ccc;padding:10px;margin:8px 0}
+.st-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ccc;margin-right:5px;vertical-align:middle}
+.st-dot.on{background:#2a2}
+.st-dot.off{background:#c44}
+#msg{margin-top:8px;font-size:0.9em}
+.ap-row{display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer;padding:4px;border-radius:4px}
+.ap-row:hover{background:#f0f0f0}
+.bars{display:inline-flex;align-items:flex-end;gap:1px;height:14px}
+.bars span{display:inline-block;width:4px;background:#ccc;border-radius:1px}
+.bars span.on{background:#2a2}
+</style>
+</head>
+<body>
+<p><a href="/">&larr; Back</a></p>
+<h2>WiFi Settings V%%VERSION%%</h2>
+
+<div class="card">
+<p><span class="st-dot" id="dot_sta"></span><strong>STA:</strong> <span id="st_sta">…</span>
+&nbsp;<button onclick="disconnect()" style="font-size:0.8em;padding:4px 8px">Disconnect</button></p>
+</div>
+
+<div class="card">
+<h3>Scan for Networks</h3>
+<button onclick="scan()">Scan</button>
+<span id="scan_status" style="margin-left:8px;font-size:0.9em"></span>
+<div id="scan_list"></div>
+</div>
+
+<div class="card">
+<h3>Saved Networks</h3>
+<div id="net_list"><em>Loading…</em></div>
+</div>
+
+<div class="card">
+<h3>Add Network</h3>
+<label>SSID<input id="wifi_ssid" type="text" placeholder="Network name"></label>
+<label>Password<input id="wifi_pass" type="password" placeholder="Password"></label>
+<br>
+<button onclick="connect()">Save &amp; Connect</button>
+<div id="msg"></div>
+</div>
+
+<div class="card">
+<h3>Access Point</h3>
+<label>SSID<input id="ap_ssid" type="text" placeholder="AP name"></label>
+<label>Password (min 8 chars, empty=open)<input id="ap_pass" type="text" placeholder="AP password"></label>
+<br>
+<button onclick="saveApCfg()">Save &amp; Restart</button>
+<span id="ap_msg" style="font-size:0.85em;margin-left:8px"></span>
+</div>
+
+<script>
+const AUTH=['Open','WEP','WPA','WPA2','WPA/WPA2','WPA3','WPA2/WPA3','WAPI','OWE'];
+function rssiToBars(rssi){
+ // 4 bars: >-55, 3: -55..-65, 2: -65..-75, 1: <-75
+ const level=rssi>-55?4:rssi>-65?3:rssi>-75?2:1;
+ const heights=[4,7,10,14];
+ return '<span class="bars">'+heights.map((h,i)=>
+  `<span class="${i<level?'on':''}" style="height:${h}px"></span>`).join('')+'</span>';
+}
+async function scan(){
+ const st=document.getElementById('scan_status');
+ const div=document.getElementById('scan_list');
+ st.textContent='Scanning…'; div.innerHTML='';
+ try{
+  const aps=await (await fetch('/wifi/scan')).json();
+  st.textContent=aps.length+' network'+(aps.length!==1?'s':'')+ ' found';
+  div.innerHTML='';
+  aps.sort((a,b)=>b.rssi-a.rssi).forEach(ap=>{
+   const row=document.createElement('div');
+   row.className='ap-row';
+   const authLabel=AUTH[ap.auth]||'?';
+   row.innerHTML=
+    rssiToBars(ap.rssi)+
+    '<span style="flex:1"><strong>'+ap.ssid+'</strong>'+
+    ' <small style="color:#888">'+ap.rssi+' dBm &middot; '+authLabel+'</small></span>'+
+    '<button onclick="prefill(\''+ap.ssid.replace(/'/g,"\\'")+'\')" style="font-size:0.8em;padding:4px 8px">Select</button>';
+   div.appendChild(row);
+  });
+ }catch(e){ st.textContent='Scan failed.'; }
+}
+function prefill(ssid){
+ document.getElementById('wifi_ssid').value=ssid;
+ document.getElementById('wifi_pass').focus();
+}
+async function connect(){
+ const ssid=document.getElementById('wifi_ssid').value.trim();
+ const pass=document.getElementById('wifi_pass').value;
+ const msg=document.getElementById('msg');
+ if(!ssid){msg.textContent='Enter SSID.';return;}
+ msg.textContent='Connecting…';
+ await fetch('/wifi/connect',{method:'POST',body:ssid+'|'+pass});
+ msg.textContent='Saved & connecting – waiting for IP…';
+ document.getElementById('wifi_ssid').value='';
+ document.getElementById('wifi_pass').value='';
+ loadNetworks();
+}
+async function connectIdx(idx){
+ await fetch('/wifi/connect_idx',{method:'POST',body:''+idx});
+ document.getElementById('msg').textContent='';
+}
+async function deleteIdx(idx){
+ await fetch('/wifi/delete',{method:'POST',body:''+idx});
+ loadNetworks();
+}
+async function disconnect(){
+ await fetch('/wifi/disconnect',{method:'POST',body:''});
+}
+async function moveNet(idx,dir){
+ await fetch('/wifi/move',{method:'POST',body:idx+'|'+dir});
+ loadNetworks();
+}
+async function loadNetworks(){
+ const div=document.getElementById('net_list');
+ try{
+  const nets=await (await fetch('/wifi/list')).json();
+  if(nets.length===0){div.innerHTML='<em>No saved networks.</em>';return;}
+  div.innerHTML='';
+  nets.forEach((n,i)=>{
+   const row=document.createElement('div');
+   row.style='margin:4px 0;display:flex;align-items:center;gap:8px';
+   const isFirst=i===0, isLast=i===nets.length-1;
+   row.innerHTML=
+    '<span style="display:flex;flex-direction:column;gap:1px">'+
+     '<button onclick="moveNet('+n.idx+',-1)" style="padding:1px 5px;font-size:0.75em;line-height:1" '+(isFirst?'disabled':'')+'>▲</button>'+
+     '<button onclick="moveNet('+n.idx+',1)"  style="padding:1px 5px;font-size:0.75em;line-height:1" '+(isLast? 'disabled':'')+'>▼</button>'+
+    '</span>'+
+    '<span style="flex:1">'+n.ssid+(i===0?' <small style="color:#888">(highest priority)</small>':'')+'</span>'+
+    '<button onclick="connectIdx('+n.idx+')">Connect</button>'+
+    '<button onclick="deleteIdx('+n.idx+')" style="color:#c00">Delete</button>';
+   div.appendChild(row);
+  });
+ }catch(e){div.innerHTML='<em>Error loading.</em>';}
+}
+async function pollStatus(){
+ try{
+  const j=await (await fetch('/status')).json();
+  document.getElementById('st_sta').textContent=j.sta?(j.ip||'connected'):'Not connected';
+  document.getElementById('dot_sta').className='st-dot '+(j.sta?'on':'off');
+ }catch(e){
+  document.getElementById('st_sta').textContent='?';
+ }
+}
+async function loadApCfg(){
+ try{
+  const j=await (await fetch('/ap/config')).json();
+  document.getElementById('ap_ssid').value=j.ssid||'';
+  document.getElementById('ap_pass').value=j.pass||'';
+ }catch(e){}
+}
+async function saveApCfg(){
+ const ssid=document.getElementById('ap_ssid').value.trim();
+ const pass=document.getElementById('ap_pass').value;
+ const msg=document.getElementById('ap_msg');
+ if(!ssid){msg.textContent='SSID required.';return;}
+ msg.textContent='Saving…';
+ await fetch('/ap/config',{method:'POST',body:ssid+'|'+pass});
+ msg.textContent='Saved – restarting…';
+}
+loadNetworks();
+loadApCfg();
+setInterval(pollStatus,2000);
+pollStatus();
+</script>
+</body>
+</html>

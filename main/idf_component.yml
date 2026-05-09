@@ -1,0 +1,2 @@
+## No external component dependencies — MQTT implemented via tcp_transport
+dependencies: {}
