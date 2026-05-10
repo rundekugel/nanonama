@@ -18,6 +18,7 @@
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
 
+#include "esp_idf_version.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -646,7 +647,11 @@ static void morse_task(void *arg)
                     esp_wps_config_t wps_cfg = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
                     s_wps_state = 1;
                     esp_wifi_wps_enable(&wps_cfg);
-                    esp_wifi_wps_start();
+                    #if 1 // ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+                        esp_wifi_wps_start(0);
+                    #else
+                        esp_wifi_wps_start();
+                    #endif
                     disp_lock();
                     ssd1306_clear();
                     ssd1306_puts(0, 2, "WPS...");
@@ -1403,7 +1408,7 @@ static esp_err_t h_wifi_wps_start(httpd_req_t *req)
     esp_wps_config_t wps_cfg = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
     s_wps_state = 1;
     esp_wifi_wps_enable(&wps_cfg);
-    esp_wifi_wps_start();
+    esp_wifi_wps_start(0);
     httpd_resp_sendstr(req, "OK");
     return ESP_OK;
 }
