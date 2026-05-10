@@ -44,6 +44,8 @@ button:hover{background:#ddd}
 <input id="tx" type="text" placeholder="chat/tx">
 <label>State topic (online/offline LWT)</label>
 <input id="state" type="text" placeholder="chat/state">
+<label>Client ID (empty = auto nanoChat-XXXXXXXX)</label>
+<input id="client_id" type="text" placeholder="leave empty for MAC-based default">
 <div class="chk">
   <input id="tls" type="checkbox" checked>
   <label style="margin:0;font-weight:normal">Use TLS (port 8883)</label>
@@ -83,6 +85,14 @@ button:hover{background:#ddd}
     <label>Display off (s, 0=never)</label>
     <input id="disp_to" type="number" value="60" min="0" max="3600">
   </div>
+  <div>
+    <label>Display col offset</label>
+    <input id="dcol" type="number" value="28" min="0" max="127">
+  </div>
+  <div>
+    <label>Display row offset</label>
+    <input id="drow" type="number" value="0" min="0" max="63">
+  </div>
 </div>
 <p style="font-size:0.8em;color:#888;margin-bottom:0">
   Hardware changes take effect after reboot.
@@ -109,13 +119,16 @@ async function load(){
     g('user').value  = j.user  || '';
     g('rx').value    = j.rx_topic    || 'chat/rx';
     g('tx').value    = j.tx_topic    || 'chat/tx';
-    g('state').value = j.state_topic || 'chat/state';
+    g('state').value     = j.state_topic || 'chat/state';
+    g('client_id').value = j.client_id  || '';
     g('tls').checked = !!j.tls;
     g('btn').value   = j.btn;
     g('sda').value   = j.sda;
     g('scl').value   = j.scl;
     g('led').value     = j.led;
     g('disp_to').value = j.disp_to;
+    g('dcol').value    = j.disp_col_off;
+    g('drow').value    = j.disp_row_off;
     if (j.has_pass)
       g('pass_hint').textContent = 'Password currently stored.';
     if (j.has_cert)
@@ -134,18 +147,21 @@ function buildBody(){
   const pass  = g('pass').value;
   const rx    = g('rx').value.trim();
   const tx    = g('tx').value.trim();
-  const state = g('state').value.trim();
+  const state     = g('state').value.trim();
+  const client_id = g('client_id').value.trim();
   const tls   = g('tls').checked ? '1' : '0';
   const btn   = g('btn').value.trim();
   const sda   = g('sda').value.trim();
   const scl   = g('scl').value.trim();
   const led    = g('led').value.trim();
   const disp_to = g('disp_to').value.trim();
+  const dcol   = g('dcol').value.trim();
+  const drow   = g('drow').value.trim();
   const wp     = g('webpass').value;
   const cert   = g('cert').value.trim();
-  /* host|port|user|pass|rx|tx|state|tls|btn|sda|scl|led|disp_to|webpass|cert */
+  /* host|port|user|pass|rx|tx|state|tls|btn|sda|scl|led|disp_to|dcol|drow|webpass|client_id|cert */
   return [host,port,user,pass,rx,tx,state,tls,
-          btn,sda,scl,led,disp_to,wp,cert].join('|');
+          btn,sda,scl,led,disp_to,dcol,drow,wp,client_id,cert].join('|');
 }
 
 async function save(){

@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_wps.h"
 #include "mqtt_simple.h"
 
 #include "ssd1306.h"
@@ -42,6 +43,8 @@ extern const unsigned char wifi_html_start[]   asm("_binary_wifi_html_start");
 extern const unsigned char wifi_html_end[]     asm("_binary_wifi_html_end");
 extern const unsigned char config_html_start[] asm("_binary_config_html_start");
 extern const unsigned char config_html_end[]   asm("_binary_config_html_end");
+extern const unsigned char help_html_start[]   asm("_binary_help_html_start");
+extern const unsigned char help_html_end[]     asm("_binary_help_html_end");
 
 /* =========================================================================
  * Configuration (NVS)
@@ -68,6 +71,7 @@ static char    s_mqtt_host[128]     = "";
 static uint16_t s_mqtt_port         = 8883;
 static char    s_mqtt_user[64]      = "";
 static char    s_mqtt_pass[64]      = "";
+static char    s_mqtt_client_id[64] = ""; /* empty = auto (nanoChat-XXXXXXXX) */
 static char    s_mqtt_rx_topic[128]    = "chat/rx";
 static char    s_mqtt_tx_topic[128]    = "chat/tx";
 static char    s_mqtt_state_topic[128] = "chat/state";
@@ -79,10 +83,12 @@ static char s_web_pass[64] = "admin";
 
 /* ---- Hardware config ---- */
 static int s_btn_pin = 9;   /* GPIO9 = boot button on many ESP32-C3 devkits */
-static int s_sda_pin = 6;
-static int s_scl_pin = 7;
+static int s_sda_pin = 5;
+static int s_scl_pin = 6;
 static int s_led_pin        = 8; /* GPIO10 = LED; -1 = disabled */
 static int s_disp_timeout_s = 60; /* display off after N seconds idle; 0=never */
+static int s_disp_col_off   = 28; /* SSD1306 column offset (default 28 for 72px display) */
+static int s_disp_row_off   = 0;  /* display start line offset (0-63) */
 
 /* ---- Runtime state ---- */
 static bool s_sta_connected   = false;
@@ -93,6 +99,9 @@ static int  s_suppress_disc   = 0;
 static TaskHandle_t s_wifi_mgr_task = NULL;
 static volatile bool s_scanning  = false;
 static volatile bool s_scan_done = false;
+
+/* WPS state: 0=idle 1=active 2=success 3=failed 4=timeout */
+static volatile int s_wps_state = 0;
 
 /* mqtt_simple_connected() used for status queries */
 static bool s_in_chat_mode = false;  /* false = show status, true = show chat */
@@ -211,9 +220,10 @@ static void mqtt_cfg_load(void) {
     nvs_handle_t h;
     if (nvs_open(MQTT_CFG_NS, NVS_READONLY, &h) != ESP_OK) return;
     size_t len;
-    len = sizeof(s_mqtt_host);     nvs_get_str(h, "host",     s_mqtt_host,     &len);
-    len = sizeof(s_mqtt_user);     nvs_get_str(h, "user",     s_mqtt_user,     &len);
-    len = sizeof(s_mqtt_pass);     nvs_get_str(h, "pass",     s_mqtt_pass,     &len);
+    len = sizeof(s_mqtt_host);        nvs_get_str(h, "host",        s_mqtt_host,        &len);
+    len = sizeof(s_mqtt_user);        nvs_get_str(h, "user",        s_mqtt_user,        &len);
+    len = sizeof(s_mqtt_pass);        nvs_get_str(h, "pass",        s_mqtt_pass,        &len);
+    len = sizeof(s_mqtt_client_id);   nvs_get_str(h, "client_id",   s_mqtt_client_id,   &len);
     len = sizeof(s_mqtt_rx_topic);    nvs_get_str(h, "rx_topic",    s_mqtt_rx_topic,    &len);
     len = sizeof(s_mqtt_tx_topic);    nvs_get_str(h, "tx_topic",    s_mqtt_tx_topic,    &len);
     len = sizeof(s_mqtt_state_topic); nvs_get_str(h, "state_topic", s_mqtt_state_topic, &len);
@@ -235,9 +245,10 @@ static void mqtt_cfg_load(void) {
 static void mqtt_cfg_save(void) {
     nvs_handle_t h;
     if (nvs_open(MQTT_CFG_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_set_str (h, "host",     s_mqtt_host);
-    nvs_set_str (h, "user",     s_mqtt_user);
-    nvs_set_str (h, "pass",     s_mqtt_pass);
+    nvs_set_str (h, "host",        s_mqtt_host);
+    nvs_set_str (h, "user",        s_mqtt_user);
+    nvs_set_str (h, "pass",        s_mqtt_pass);
+    nvs_set_str (h, "client_id",   s_mqtt_client_id);
     nvs_set_str (h, "rx_topic",    s_mqtt_rx_topic);
     nvs_set_str (h, "tx_topic",    s_mqtt_tx_topic);
     nvs_set_str (h, "state_topic", s_mqtt_state_topic);
@@ -271,6 +282,8 @@ static void hw_cfg_load(void) {
     if (nvs_get_i8(h, "sda", &v) == ESP_OK) s_sda_pin = v;
     if (nvs_get_i8(h, "scl", &v) == ESP_OK) s_scl_pin = v;
     if (nvs_get_i8(h, "led", &v) == ESP_OK) s_led_pin = v;
+    if (nvs_get_i8(h, "dcol", &v) == ESP_OK) s_disp_col_off = v;
+    if (nvs_get_i8(h, "drow", &v) == ESP_OK) s_disp_row_off = v;
     int16_t v16;
     if (nvs_get_i16(h, "disp_to", &v16) == ESP_OK) s_disp_timeout_s = v16;
     nvs_close(h);
@@ -283,6 +296,8 @@ static void hw_cfg_save(void) {
     nvs_set_i8(h, "sda", (int8_t)s_sda_pin);
     nvs_set_i8(h, "scl", (int8_t)s_scl_pin);
     nvs_set_i8 (h, "led",     (int8_t) s_led_pin);
+    nvs_set_i8 (h, "dcol",    (int8_t) s_disp_col_off);
+    nvs_set_i8 (h, "drow",    (int8_t) s_disp_row_off);
     nvs_set_i16(h, "disp_to", (int16_t)s_disp_timeout_s);
     nvs_commit(h); nvs_close(h);
 }
@@ -320,14 +335,10 @@ static void pager_pump_locked(void)
         s_pager_count--;
         s_page_row++;
     }
-    /* Page full and more lines pending:
-       requeue last displayed line, show [more] indicator */
+    /* Page full and more lines pending: show [more] in morse row */
     if (s_page_row == CHAT_ROWS && s_pager_count > 0) {
-        s_pager_tail  = (s_pager_tail - 1 + PAGER_CAPACITY) % PAGER_CAPACITY;
-        s_pager_count++;
-        s_page_row--;
-        ssd1306_clear_row(CHAT_ROWS - 1);
-        ssd1306_puts(0, CHAT_ROWS - 1, "[more]");
+        ssd1306_clear_row(MORSE_ROW);
+        ssd1306_puts(0, MORSE_ROW, "[MORE]");
         s_pager_waiting = true;
     }
     ssd1306_flush();
@@ -357,6 +368,7 @@ static void pager_advance(void)
     disp_lock();
     s_pager_waiting = false;
     s_page_row = 0;
+    ssd1306_clear_row(MORSE_ROW);
     for (int r = 0; r < CHAT_ROWS; r++)
         ssd1306_clear_row(r);
     pager_pump_locked();
@@ -374,6 +386,7 @@ static void pager_clear(void)
     s_pager_waiting = false;
     for (int r = 0; r < CHAT_ROWS; r++)
         ssd1306_clear_row(r);
+    ssd1306_clear_row(MORSE_ROW);
     ssd1306_flush();
     disp_unlock();
 }
@@ -627,6 +640,23 @@ static void morse_task(void *arg)
             }
             disp_activity();
 
+            /* Very long press (>5 s): start WPS */
+            if (dur_us >= 5000000LL) {
+                if (s_wps_state != 1) {
+                    esp_wps_config_t wps_cfg = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
+                    s_wps_state = 1;
+                    esp_wifi_wps_enable(&wps_cfg);
+                    esp_wifi_wps_start();
+                    disp_lock();
+                    ssd1306_clear();
+                    ssd1306_puts(0, 2, "WPS...");
+                    ssd1306_puts(0, 3, "PRESS ROUTER");
+                    ssd1306_flush();
+                    disp_unlock();
+                }
+                continue;
+            }
+
             /* Long press (>3 s): turn display off */
             if (dur_us >= 3000000LL) {
                 s_disp_on = false;
@@ -784,12 +814,27 @@ static void mqtt_start(void)
     }
     mqtt_simple_stop(); /* stop any running instance */
 
+    /* Build effective client_id: use configured value or derive from MAC hash */
+    static char s_effective_client_id[64];
+    if (s_mqtt_client_id[0]) {
+        strncpy(s_effective_client_id, s_mqtt_client_id, sizeof(s_effective_client_id) - 1);
+        s_effective_client_id[sizeof(s_effective_client_id) - 1] = '\0';
+    } else {
+        uint8_t mac[6] = {0};
+        esp_wifi_get_mac(WIFI_IF_STA, mac);
+        uint32_t h = 2166136261u; /* FNV-1a 32-bit */
+        for (int i = 0; i < 6; i++) { h ^= mac[i]; h *= 16777619u; }
+        snprintf(s_effective_client_id, sizeof(s_effective_client_id),
+                 "nanoChat-%08X", (unsigned)h);
+    }
+
     mqtt_simple_cfg_t cfg = {
         .host            = s_mqtt_host,
         .port            = s_mqtt_port,
         .username        = s_mqtt_user[0]            ? s_mqtt_user : NULL,
         .password        = s_mqtt_pass[0]            ? s_mqtt_pass : NULL,
         .ca_cert_pem     = (s_mqtt_cert && s_mqtt_cert[0]) ? s_mqtt_cert : NULL,
+        .client_id       = s_effective_client_id,
         .use_tls         = s_mqtt_tls != 0,
         .keepalive_sec   = 60,
         .will_topic      = s_mqtt_state_topic[0] ? s_mqtt_state_topic : NULL,
@@ -922,6 +967,26 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         if (s_suppress_disc > 0) { s_suppress_disc--; return; }
         if (s_manual_disc)       { s_manual_disc = false; return; }
         if (!s_in_chat_mode) status_display();
+        if (s_wifi_mgr_task) xTaskNotifyGive(s_wifi_mgr_task);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_WPS_ER_SUCCESS) {
+        esp_wifi_wps_disable();
+        wifi_event_sta_wps_er_success_t *ev =
+            (wifi_event_sta_wps_er_success_t *)data;
+        if (ev && ev->ap_cred_cnt > 0) {
+            const char *ssid = (const char *)ev->ap_cred[0].ssid;
+            const char *pass = (const char *)ev->ap_cred[0].passphrase;
+            creds_add(ssid, pass);
+            creds_save();
+            wifi_do_connect(s_wifi_cred_count - 1);
+        }
+        s_wps_state = 2; /* success */
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_WPS_ER_FAILED) {
+        esp_wifi_wps_disable();
+        s_wps_state = 3; /* failed */
+        if (s_wifi_mgr_task) xTaskNotifyGive(s_wifi_mgr_task);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_WPS_ER_TIMEOUT) {
+        esp_wifi_wps_disable();
+        s_wps_state = 4; /* timeout */
         if (s_wifi_mgr_task) xTaskNotifyGive(s_wifi_mgr_task);
     }
 }
@@ -1227,22 +1292,33 @@ static esp_err_t h_config(httpd_req_t *req)
     return send_html(req, config_html_start, config_html_end);
 }
 
+/* ---- Help page ---- */
+static esp_err_t h_help(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+    return send_html(req, help_html_start, help_html_end);
+}
+
 static esp_err_t h_config_get(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
-    char out[896];
+    char out[960];
     snprintf(out, sizeof(out),
              "{\"host\":\"%s\",\"port\":%d,\"user\":\"%s\","
              "\"rx_topic\":\"%s\",\"tx_topic\":\"%s\",\"state_topic\":\"%s\","
              "\"tls\":%d,\"has_cert\":%d,\"has_pass\":%d,"
+             "\"client_id\":\"%s\","
              "\"btn\":%d,\"sda\":%d,\"scl\":%d,"
-             "\"led\":%d,\"disp_to\":%d}",
+             "\"led\":%d,\"disp_to\":%d,"
+             "\"disp_col_off\":%d,\"disp_row_off\":%d}",
              s_mqtt_host, (int)s_mqtt_port, s_mqtt_user,
              s_mqtt_rx_topic, s_mqtt_tx_topic, s_mqtt_state_topic,
              (int)s_mqtt_tls, (s_mqtt_cert && s_mqtt_cert[0]) ? 1 : 0,
              s_mqtt_pass[0] ? 1 : 0,
+             s_mqtt_client_id,
              s_btn_pin, s_sda_pin, s_scl_pin,
-             s_led_pin, s_disp_timeout_s);
+             s_led_pin, s_disp_timeout_s,
+             s_disp_col_off, s_disp_row_off);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, out);
     return ESP_OK;
@@ -1252,7 +1328,7 @@ static esp_err_t h_config_set(httpd_req_t *req)
 {
     if (!check_auth(req)) return ESP_OK;
     /* Body format (pipe-delimited):
-     * host|port|user|pass|rx|tx|state|tls|btn|sda|scl|led|disp_to|web_pass|cert */
+     * host|port|user|pass|rx|tx|state|tls|btn|sda|scl|led|disp_to|dcol|drow|web_pass|client_id|cert */
     size_t body_sz = req->content_len + 1;
     if (body_sz > 8192) body_sz = 8192;
     char *buf = malloc(body_sz);
@@ -1274,8 +1350,11 @@ static esp_err_t h_config_set(httpd_req_t *req)
     char *scl_s     = strsep(&sp, "|");
     char *led_s     = strsep(&sp, "|");
     char *disp_to_s = strsep(&sp, "|");
-    char *web_pass  = strsep(&sp, "|");
-    char *cert      = sp; /* remainder = PEM (may contain newlines, no pipes) */
+    char *dcol_s    = strsep(&sp, "|");
+    char *drow_s    = strsep(&sp, "|");
+    char *web_pass    = strsep(&sp, "|");
+    char *client_id_s = strsep(&sp, "|");
+    char *cert        = sp; /* remainder = PEM (may contain newlines, no pipes) */
 
     if (host)     strncpy(s_mqtt_host,        host,    sizeof(s_mqtt_host) - 1);
     if (port_s)   s_mqtt_port  = (uint16_t)atoi(port_s);
@@ -1290,8 +1369,11 @@ static esp_err_t h_config_set(httpd_req_t *req)
     if (scl_s)    s_scl_pin    = atoi(scl_s);
     if (led_s)      s_led_pin         = atoi(led_s);
     if (disp_to_s)  s_disp_timeout_s  = atoi(disp_to_s);
+    if (dcol_s)     s_disp_col_off    = atoi(dcol_s);
+    if (drow_s)     s_disp_row_off    = atoi(drow_s);
     if (web_pass && web_pass[0])
                   strncpy(s_web_pass, web_pass, sizeof(s_web_pass) - 1);
+    if (client_id_s) strncpy(s_mqtt_client_id, client_id_s, sizeof(s_mqtt_client_id) - 1);
     if (cert && cert[0]) {
         free(s_mqtt_cert);
         s_mqtt_cert = strdup(cert);
@@ -1311,6 +1393,34 @@ static esp_err_t h_config_set(httpd_req_t *req)
  * HTTP server startup
  * ========================================================================= */
 
+static esp_err_t h_wifi_wps_start(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+    if (s_wps_state == 1) {
+        httpd_resp_sendstr(req, "busy");
+        return ESP_OK;
+    }
+    esp_wps_config_t wps_cfg = WPS_CONFIG_INIT_DEFAULT(WPS_TYPE_PBC);
+    s_wps_state = 1;
+    esp_wifi_wps_enable(&wps_cfg);
+    esp_wifi_wps_start();
+    httpd_resp_sendstr(req, "OK");
+    return ESP_OK;
+}
+
+static esp_err_t h_wifi_wps_status(httpd_req_t *req)
+{
+    if (!check_auth(req)) return ESP_OK;
+    static const char *names[] = {"idle","active","success","failed","timeout"};
+    int st = s_wps_state;
+    if (st < 0 || st > 4) st = 0;
+    httpd_resp_set_type(req, "application/json");
+    char out[32];
+    snprintf(out, sizeof(out), "{\"state\":\"%s\"}", names[st]);
+    httpd_resp_sendstr(req, out);
+    return ESP_OK;
+}
+
 static void web_start(void)
 {
     httpd_handle_t server = NULL;
@@ -1325,6 +1435,7 @@ static void web_start(void)
 
     URI("/",                  HTTP_GET,  h_root);
     URI("/status",            HTTP_GET,  h_status);
+    URI("/help",              HTTP_GET,  h_help);
     URI("/wifi",              HTTP_GET,  h_wifi);
     URI("/wifi/connect",      HTTP_POST, h_wifi_connect);
     URI("/wifi/disconnect",   HTTP_POST, h_wifi_disconnect);
@@ -1333,6 +1444,8 @@ static void web_start(void)
     URI("/wifi/connect_idx",  HTTP_POST, h_wifi_connect_idx);
     URI("/wifi/move",         HTTP_POST, h_wifi_move);
     URI("/wifi/scan",         HTTP_GET,  h_wifi_scan);
+    URI("/wifi/wps",          HTTP_POST, h_wifi_wps_start);
+    URI("/wifi/wps/status",   HTTP_GET,  h_wifi_wps_status);
     URI("/ap/config",         HTTP_GET,  h_ap_get);
     URI("/ap/config",         HTTP_POST, h_ap_set);
     URI("/config",            HTTP_GET,  h_config);
@@ -1363,7 +1476,7 @@ void app_main(void)
 
     /* Display */
     s_disp_mutex = xSemaphoreCreateMutex();
-    ssd1306_init(s_sda_pin, s_scl_pin, 0x3C);
+    ssd1306_init(s_sda_pin, s_scl_pin, 0x3C, s_disp_col_off, s_disp_row_off);
 
     /* Morse button */
     morse_init();

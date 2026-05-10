@@ -41,6 +41,12 @@ button{margin:4px;padding:8px}
 </div>
 
 <div class="card">
+<h3>WPS (Push Button)</h3>
+<button onclick="wpsStart()">Start WPS</button>
+<span id="wps_msg" style="margin-left:8px;font-size:0.9em"></span>
+</div>
+
+<div class="card">
 <h3>Add Network</h3>
 <label>SSID<input id="wifi_ssid" type="text" placeholder="Network name"></label>
 <label>Password<input id="wifi_pass" type="password" placeholder="Password"></label>
@@ -165,6 +171,29 @@ async function saveApCfg(){
  msg.textContent='Saving…';
  await fetch('/ap/config',{method:'POST',body:ssid+'|'+pass});
  msg.textContent='Saved – restarting…';
+}
+let wpsTimer = null;
+async function wpsStart(){
+  const msg = document.getElementById('wps_msg');
+  msg.textContent = 'Starting WPS…';
+  const r = await fetch('/wifi/wps', {method:'POST'});
+  const t = await r.text();
+  if (t !== 'OK') { msg.textContent = 'Error: ' + t; return; }
+  msg.textContent = 'Press WPS button on router…';
+  if (wpsTimer) clearInterval(wpsTimer);
+  wpsTimer = setInterval(async () => {
+    try {
+      const j = await (await fetch('/wifi/wps/status')).json();
+      if (j.state === 'active') return;
+      clearInterval(wpsTimer); wpsTimer = null;
+      if (j.state === 'success') {
+        msg.textContent = 'WPS success – connected!';
+        loadNetworks();
+      } else {
+        msg.textContent = 'WPS ' + j.state + '.';
+      }
+    } catch(e) { clearInterval(wpsTimer); wpsTimer = null; }
+  }, 2000);
 }
 loadNetworks();
 loadApCfg();

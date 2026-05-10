@@ -218,15 +218,14 @@ static esp_err_t send_disconnect(esp_transport_handle_t t)
 
 /* ---- Main reader loop ---------------------------------------------------- */
 
-static void handle_incoming(esp_transport_handle_t t)
+/* Returns true on success, false on read error (caller must disconnect) */
+static bool handle_incoming(esp_transport_handle_t t)
 {
-    /* Read fixed header byte 1 (already consumed by caller → passed via pkt_type) */
-    /* We're called from within the loop, transport is readable */
     uint8_t type_byte;
-    if (transport_read_all(t, &type_byte, 1) < 0) return;
+    if (transport_read_all(t, &type_byte, 1) < 0) return false;
 
     int rem = read_remlen(t);
-    if (rem < 0) return;
+    if (rem < 0) return false;
 
     uint8_t pkt_type = type_byte & 0xF0;
 
@@ -238,17 +237,17 @@ static void handle_incoming(esp_transport_handle_t t)
             uint8_t trash[64];
             while (rem > 0) {
                 int chunk = rem > 64 ? 64 : rem;
-                if (transport_read_all(t, trash, chunk) < 0) return;
+                if (transport_read_all(t, trash, chunk) < 0) return false;
                 rem -= chunk;
             }
-            return;
+            return true;
         }
         uint8_t *buf = malloc(rem);
-        if (!buf) return;
-        if (transport_read_all(t, buf, rem) < 0) { free(buf); return; }
+        if (!buf) return true; /* OOM: skip packet but don't disconnect */
+        if (transport_read_all(t, buf, rem) < 0) { free(buf); return false; }
 
         int tlen = (buf[0] << 8) | buf[1];
-        if (tlen + 2 > rem) { free(buf); return; }
+        if (tlen + 2 > rem) { free(buf); return true; }
         const char *topic = (const char *)(buf + 2);
         /* For QoS > 0 there is a 2-byte packet ID before the payload */
         int payload_off = 2 + tlen + (qos > 0 ? 2 : 0);
@@ -274,10 +273,11 @@ static void handle_incoming(esp_transport_handle_t t)
         uint8_t trash[64];
         while (rem > 0) {
             int chunk = rem > 64 ? 64 : rem;
-            if (transport_read_all(t, trash, chunk) < 0) return;
+            if (transport_read_all(t, trash, chunk) < 0) return false;
             rem -= chunk;
         }
     }
+    return true;
 }
 
 /* ---- MQTT client task ---------------------------------------------------- */
@@ -353,7 +353,7 @@ static void mqtt_task(void *arg)
                 break;
             }
             if (n > 0) {
-                handle_incoming(t);
+                if (!handle_incoming(t)) break;
             }
             /* Keepalive PINGREQ — must hold mutex so it doesn't race with publish */
             if ((xTaskGetTickCount() - last_ping) >= ping_interval) {

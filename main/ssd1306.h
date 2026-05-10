@@ -16,13 +16,13 @@
 #define OLED_COL_OFFSET 28
 #endif
 
-#define OLED_COLS  (OLED_WIDTH  / 8)
+#define OLED_COLS  (OLED_WIDTH  / 5)   /* 4px glyph + 1px gap = 5px/char → 14 cols */
 #define OLED_ROWS  (OLED_HEIGHT / 8)
 
 /* Initialise I2C and the SSD1306.
  * sda_pin / scl_pin: GPIO numbers.
  * i2c_addr: usually 0x3C or 0x3D. */
-void ssd1306_init(int sda_pin, int scl_pin, uint8_t i2c_addr);
+void ssd1306_init(int sda_pin, int scl_pin, uint8_t i2c_addr, int col_off, int row_off);
 
 /* Clear the internal framebuffer (does NOT flush to display). */
 void ssd1306_clear(void);

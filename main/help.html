@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>nanoChat Help V%%VERSION%%</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:Arial,sans-serif;margin:20px;max-width:520px}
+h2{font-size:1.1em;margin:16px 0 4px}
+table{border-collapse:collapse;width:100%;font-size:0.9em}
+td,th{border:1px solid #ccc;padding:5px 8px;text-align:left}
+th{background:#f0f0f0}
+.card{border:1px solid #ccc;border-radius:6px;padding:12px;margin:10px 0}
+code{font-family:monospace;background:#f4f4f4;padding:1px 4px;border-radius:3px}
+</style>
+</head>
+<body>
+<p><a href="/">&larr; Back</a></p>
+<h1 style="font-size:1.3em">nanoChat Help V%%VERSION%%</h1>
+
+<div class="card">
+<h2>Button</h2>
+<table>
+<tr><th>Press</th><th>Action</th></tr>
+<tr><td>Short (&lt;2× dot)</td><td>Morse dot</td></tr>
+<tr><td>Long (≥2× dot)</td><td>Morse dash</td></tr>
+<tr><td>Display off → any</td><td>Wake display</td></tr>
+<tr><td>Wait (letter gap)</td><td>Send letter</td></tr>
+<tr><td>Wait (word gap)</td><td>Send word</td></tr>
+<tr><td>&gt;3 s</td><td>Display off</td></tr>
+<tr><td>&gt;5 s</td><td>Start WPS (also press router WPS button)</td></tr>
+<tr><td>Any (pager waiting)</td><td>Show next page of messages</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>MQTT Topics</h2>
+<table>
+<tr><th>Topic</th><th>Direction</th><th>Content</th></tr>
+<tr><td><code>rx_topic</code></td><td>Subscribe</td><td>Incoming text displayed on OLED</td></tr>
+<tr><td><code>tx_topic/1</code></td><td>Publish</td><td>Single decoded letter (immediate)</td></tr>
+<tr><td><code>tx_topic/word</code></td><td>Publish</td><td>Full word after word-gap silence</td></tr>
+<tr><td><code>state_topic</code></td><td>LWT</td><td><code>online</code> / <code>offline</code></td></tr>
+</table>
+<p style="font-size:0.85em;color:#666">Topics are configured on the MQTT &amp; Hardware page.</p>
+</div>
+
+<div class="card">
+<h2>Morse Code</h2>
+<table>
+<tr><th>Char</th><th>Code</th><th>Char</th><th>Code</th><th>Char</th><th>Code</th></tr>
+<tr><td>A</td><td>·−</td><td>J</td><td>·−−−</td><td>S</td><td>···</td></tr>
+<tr><td>B</td><td>−···</td><td>K</td><td>−·−</td><td>T</td><td>−</td></tr>
+<tr><td>C</td><td>−·−·</td><td>L</td><td>·−··</td><td>U</td><td>··−</td></tr>
+<tr><td>D</td><td>−··</td><td>M</td><td>−−</td><td>V</td><td>···−</td></tr>
+<tr><td>E</td><td>·</td><td>N</td><td>−·</td><td>W</td><td>·−−</td></tr>
+<tr><td>F</td><td>··−·</td><td>O</td><td>−−−</td><td>X</td><td>−··−</td></tr>
+<tr><td>G</td><td>−−·</td><td>P</td><td>·−−·</td><td>Y</td><td>−·−−</td></tr>
+<tr><td>H</td><td>····</td><td>Q</td><td>−−·−</td><td>Z</td><td>−−··</td></tr>
+<tr><td>I</td><td>··</td><td>R</td><td>·−·</td><td></td><td></td></tr>
+</table>
+<table style="margin-top:6px">
+<tr><th>Digit</th><th>Code</th><th>Digit</th><th>Code</th></tr>
+<tr><td>0</td><td>−−−−−</td><td>5</td><td>·····</td></tr>
+<tr><td>1</td><td>·−−−−</td><td>6</td><td>−····</td></tr>
+<tr><td>2</td><td>··−−−</td><td>7</td><td>−−···</td></tr>
+<tr><td>3</td><td>···−−</td><td>8</td><td>−−−··</td></tr>
+<tr><td>4</td><td>····−</td><td>9</td><td>−−−−·</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>Display Layout</h2>
+<p style="font-size:0.9em">
+Rows 0–3: incoming message history (pager)<br>
+Row 4: morse input buffer (current letter being keyed)<br>
+LED flashes when unread messages are waiting (pager full).<br>
+Display auto-off after configurable idle timeout.
+</p>
+</div>
+
+<div class="card">
+<h2>Web Interface</h2>
+<table>
+<tr><th>URL</th><th>Description</th></tr>
+<tr><td><code>/</code></td><td>Status &amp; navigation</td></tr>
+<tr><td><code>/wifi</code></td><td>WiFi networks, WPS</td></tr>
+<tr><td><code>/config</code></td><td>MQTT broker, hardware GPIO, web password</td></tr>
+<tr><td><code>/help</code></td><td>This page</td></tr>
+<tr><td><code>/status</code></td><td>JSON status (API)</td></tr>
+<tr><td><code>/reboot</code></td><td>POST to reboot device</td></tr>
+</table>
+<p style="font-size:0.85em;color:#666">All pages require HTTP Basic Auth (username: <code>admin</code>).</p>
+</div>
+
+</body>
+</html>

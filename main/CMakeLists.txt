@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "main.c" "ssd1306.c" "mqtt_simple.c"
     INCLUDE_DIRS "."
-    EMBED_TXTFILES "index.html" "wifi.html" "config.html"
+    EMBED_TXTFILES "index.html" "wifi.html" "config.html" "help.html"
     REQUIRES
         esp_wifi
         esp_event
@@ -9,8 +9,10 @@ idf_component_register(
         esp_http_server
         tcp_transport
         driver
+        esp_driver_i2c
         esp_driver_gpio
         esp_timer
         esp_netif
         mbedtls
+        wpa_supplicant
 )
