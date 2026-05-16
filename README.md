@@ -1,5 +1,6 @@
 # nanonama
-A tiny message machine
+A tiny message machine 
+ -. .- -. --- -. .- -- .-
 
 Read / write via MQTT.
 Write via one morse button
