@@ -9,3 +9,8 @@ Config via onboard HTTP-server.
 
 # Build
 Needs ESP-IDF to build
+
+then: 
+
+ idf.py build
+ 
